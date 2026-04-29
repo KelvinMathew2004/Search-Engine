@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Googol</title>
+    <!-- Tailwind CSS for Google-like styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lunr.js: Open Source search platform (JavaScript port of Lucene) -->
+    <script src="https://unpkg.com/lunr/lunr.js"></script>
+    <!-- PapaParse for reading the lyrics.csv -->
+    <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+    <!-- Import our config "env" file -->
+    <script src="config.js"></script>
+
+    <style>
+        /* Google-like snippet highlighting */
+        .snippet-text strong {
+            font-weight: bold;
+            color: #1a202c;
+            background-color: #fefcbf;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        .link-title { color: #1a0dab; }
+        .link-url { color: #202124; }
+        .snippet-desc { color: #4d5156; }
+    </style>
+</head>
+<body class="bg-white text-gray-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Manual CSV Upload (Only shows if fetch fails, useful for local testing) -->
+    <div id="file-upload-container" class="hidden fixed top-4 right-4 bg-yellow-50 p-4 rounded shadow border border-yellow-200 z-50">
+        <p class="mb-2 font-semibold text-sm">⚠️ lyrics.csv not found on server</p>
+        <p class="mb-2 text-xs">For local testing, select your lyrics.csv file:</p>
+        <input type="file" id="csv-upload" accept=".csv" class="text-xs" onchange="handleFileUpload(event)">
+    </div>
+
+    <!-- HOME VIEW (Big center search bar) -->
+    <div id="home-view" class="flex flex-col items-center justify-center min-h-screen transition-all duration-300">
+        <h1 class="text-6xl font-bold mb-8 tracking-tighter">
+            <span class="text-blue-500">G</span><span class="text-red-500">o</span><span class="text-yellow-500">o</span><span class="text-blue-500">g</span><span class="text-green-500">o</span><span class="text-red-500">l</span>
+        </h1>
+        
+        <div class="w-full max-w-2xl flex items-center border hover:shadow-md focus-within:shadow-md rounded-full px-5 py-3 transition-shadow">
+            <svg class="w-5 h-5 text-gray-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            <input type="text" id="search-input-home" class="w-full outline-none text-lg" placeholder="Search the web or local lyrics...">
+        </div>
+
+        <div class="mt-6 flex space-x-8 text-sm">
+            <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="radio" name="mode" value="web" checked class="w-4 h-4 text-blue-600"> 
+                <span>Web Search</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="radio" name="mode" value="local" class="w-4 h-4 text-blue-600"> 
+                <span>Local Search (Lyrics)</span>
+            </label>
+        </div>
+
+        <div class="mt-8 space-x-4">
+            <button onclick="triggerSearch('home')" class="bg-gray-50 hover:bg-gray-100 border text-gray-800 px-6 py-2 rounded text-sm focus:outline-none">Googol Search</button>
+            <button onclick="triggerSearch('home')" class="bg-gray-50 hover:bg-gray-100 border text-gray-800 px-6 py-2 rounded text-sm focus:outline-none">I'm Feeling Lucky</button>
+        </div>
+    </div>
+
+    <!-- RESULTS VIEW (Top search bar) -->
+    <div id="results-view" class="hidden flex-grow flex flex-col">
+        <!-- Header -->
+        <div class="border-b p-4 flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 sticky top-0 bg-white z-40">
+            <h1 class="text-2xl font-bold mr-8 cursor-pointer tracking-tighter" onclick="goHome()">
+                <span class="text-blue-500">G</span><span class="text-red-500">o</span><span class="text-yellow-500">o</span><span class="text-blue-500">g</span><span class="text-green-500">o</span><span class="text-red-500">l</span>
+            </h1>
+            <div class="flex-grow max-w-3xl flex items-center border hover:shadow-md focus-within:shadow-md rounded-full px-4 py-2 transition-shadow bg-white">
+                <input type="text" id="search-input-results" class="w-full outline-none" placeholder="Search...">
+                <button onclick="triggerSearch('results')" class="ml-2 focus:outline-none">
+                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </button>
+            </div>
+            <div class="md:ml-8 flex space-x-4 text-sm">
+                <label class="flex items-center space-x-1 cursor-pointer">
+                    <input type="radio" name="rmode" value="web" checked class="w-4 h-4 text-blue-600"> <span>Web</span>
+                </label>
+                <label class="flex items-center space-x-1 cursor-pointer">
+                    <input type="radio" name="rmode" value="local" class="w-4 h-4 text-blue-600"> <span>Local</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Results Container -->
+        <div class="p-4 md:pl-32 max-w-4xl mt-4 flex-grow">
+            <p id="stats-text" class="text-sm text-gray-500 mb-6 hidden">About <span id="res-count">0</span> results <span id="page-stat-text"></span></p>
+            <div id="spinner" class="hidden my-8 text-gray-500">Loading results...</div>
+            <div id="results-container" class="space-y-8"></div>
+            
+            <!-- Pagination Controls -->
+            <div id="pagination-controls" class="hidden flex items-center justify-center space-x-6 mt-12 pb-12 border-t pt-6">
+                <button id="btn-prev" onclick="changePage(-1)" class="text-blue-600 hover:underline disabled:text-gray-400 disabled:no-underline font-medium focus:outline-none flex items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> Previous
+                </button>
+                <span id="page-indicator" class="text-gray-600 font-medium">Page 1</span>
+                <button id="btn-next" onclick="changePage(1)" class="text-blue-600 hover:underline disabled:text-gray-400 disabled:no-underline font-medium focus:outline-none flex items-center">
+                    Next <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SONG LYRICS MODAL -->
+    <div id="lyrics-modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="p-5 border-b flex justify-between items-start">
+                <div>
+                    <h2 id="modal-title" class="text-2xl font-bold text-gray-800"></h2>
+                    <p id="modal-artist" class="text-sm text-gray-500 mt-1"></p>
+                </div>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-800 text-2xl focus:outline-none">&times;</button>
+            </div>
+            <div id="modal-lyrics" class="p-6 overflow-y-auto whitespace-pre-wrap text-gray-700 font-serif leading-relaxed"></div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION & STATE
+        // ==========================================
+        // Safely load config values
+        const GOOGLE_API_KEY = typeof CONFIG !== 'undefined' ? CONFIG.GOOGLE_API_KEY : ""; 
+        const GOOGLE_CX = typeof CONFIG !== 'undefined' ? CONFIG.GOOGLE_CX : "";
+
+        let currentMode = 'web';
+        let lunrIndex = null;
+        let localDocuments = {};
+        let isLocalIndexReady = false;
+        
+        // Pagination State
+        let currentQuery = '';
+        let currentPage = 1;
+        const RESULTS_PER_PAGE = 10;
+        let cachedLocalResults = []; // Cache lunr searches so we don't research every page flip
+
+        // ==========================================
+        // LOCAL SEARCH INDEXING (LUNR + PAPAPARSE)
+        // ==========================================
+        async function initLocalSearch() {
+            try {
+                const response = await fetch('lyrics.csv');
+                if (!response.ok) throw new Error("File not found");
+                const text = await response.text();
+                parseAndIndex(text);
+            } catch (e) {
+                console.warn("Could not fetch lyrics.csv. Please upload manually for local testing.");
+                document.getElementById('file-upload-container').classList.remove('hidden');
+            }
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                Papa.parse(file, { 
+                    header: true, 
+                    skipEmptyLines: true,
+                    transformHeader: function(h) { return h.toLowerCase().trim(); },
+                    complete: (res) => {
+                        parseAndIndex(res.data, true);
+                        document.getElementById('file-upload-container').classList.add('hidden');
+                    }
+                });
+            }
+        }
+
+        function parseAndIndex(data, isParsedObject = false) {
+            const config = {
+                header: true,
+                skipEmptyLines: true,
+                transformHeader: function(h) { return h.toLowerCase().trim(); },
+                complete: function(results) {
+                    const rows = results.data;
+                    lunrIndex = lunr(function () {
+                        this.ref('id');
+                        this.field('title', { boost: 10 });
+                        this.field('artist', { boost: 5 });
+                        this.field('lyrics');
+                        this.metadataWhitelist = ['position']; 
+
+                        rows.forEach((row, idx) => {
+                            const songTitle = row.song || row.title || "Unknown Title";
+                            const songLyrics = row.lyrics || "";
+
+                            if (songTitle) {
+                                const docId = idx.toString();
+                                const doc = {
+                                    id: docId,
+                                    title: songTitle,
+                                    artist: row.artist || "Unknown Artist",
+                                    year: row.year || "N/A",
+                                    rank: row.rank || "-",
+                                    lyrics: songLyrics
+                                };
+                                localDocuments[docId] = doc;
+                                this.add(doc);
+                            }
+                        });
+                    });
+                    isLocalIndexReady = true;
+                    console.log(`Successfully indexed ${Object.keys(localDocuments).length} songs.`);
+                }
+            };
+            
+            if (isParsedObject) { config.complete({data: data}); } 
+            else { Papa.parse(data, config); }
+        }
+
+        // ==========================================
+        // SEARCH EXECUTION & API LOGIC
+        // ==========================================
+        async function triggerSearch(source, isNewSearch = true) {
+            const query = document.getElementById(`search-input-${source}`).value.trim();
+            if (!query) return;
+
+            if (isNewSearch) {
+                currentQuery = query;
+                currentPage = 1;
+            }
+
+            document.getElementById('search-input-results').value = currentQuery;
+            document.getElementById('home-view').classList.add('hidden');
+            document.getElementById('results-view').classList.remove('hidden');
+            document.getElementById('pagination-controls').classList.add('hidden');
+            
+            const container = document.getElementById('results-container');
+            container.innerHTML = '';
+            document.getElementById('stats-text').classList.add('hidden');
+            document.getElementById('spinner').classList.remove('hidden');
+
+            try {
+                if (currentMode === 'web') {
+                    await performWebSearch(currentQuery, container);
+                } else {
+                    performLocalSearch(currentQuery, container, isNewSearch);
+                }
+            } catch (err) {
+                container.innerHTML = `<p class="text-red-500">Error performing search: ${err.message}</p>`;
+            } finally {
+                document.getElementById('spinner').classList.add('hidden');
+            }
+        }
+
+        async function performWebSearch(query, container) {
+            try {
+                // Google Pagination uses 'start' (1, 11, 21...)
+                const startIndex = ((currentPage - 1) * RESULTS_PER_PAGE) + 1;
+                
+                const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}&start=${startIndex}`;
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (data.error) {
+                    console.warn("Google API Error detected. Seamlessly falling back to free Web API...", data.error.message);
+                    return fallbackWebSearch(query, container);
+                }
+                
+                let results = [];
+                if (data.items) {
+                    results = data.items.map(item => ({
+                        title: item.title,
+                        url: item.link,
+                        snippet: item.snippet
+                    }));
+                }
+
+                const totalResults = data.searchInformation ? parseInt(data.searchInformation.totalResults) : results.length;
+                updateStatsText(totalResults);
+                updatePagination(totalResults, data.queries?.nextPage !== undefined);
+
+                if (results.length === 0) {
+                    container.innerHTML = `<p>No web results found for "<b>${query}</b>" on this page.</p>`;
+                    return;
+                }
+
+                renderWebResultsHTML(results, container);
+                
+            } catch (error) {
+                console.warn("Network Error. Falling back...", error);
+                return fallbackWebSearch(query, container);
+            }
+        }
+
+        // FALLBACK WEB SEARCH
+        async function fallbackWebSearch(query, container) {
+            try {
+                // Wikipedia Pagination uses 'sroffset' (0, 10, 20...)
+                const offset = (currentPage - 1) * RESULTS_PER_PAGE;
+                const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json&origin=*&sroffset=${offset}`);
+                const data = await res.json();
+                
+                const results = data.query.search.map(item => ({
+                    title: item.title,
+                    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
+                    snippet: item.snippet + "..."
+                }));
+
+                const totalResults = data.query.searchinfo.totalhits || results.length;
+                updateStatsText(totalResults);
+                updatePagination(totalResults, data.continue !== undefined);
+
+                if (results.length === 0) {
+                    container.innerHTML = `<p>No web results found for "<b>${query}</b>" on this page.</p>`;
+                    return;
+                }
+
+                renderWebResultsHTML(results, container);
+            } catch (error) {
+                container.innerHTML = `<p class="text-red-500">Search Error: ${error.message}</p>`;
+            }
+        }
+
+        function renderWebResultsHTML(results, container) {
+            container.innerHTML = results.map(res => `
+                <div class="mb-6">
+                    <a href="${res.url}" target="_blank" class="link-url text-sm truncate block flex items-center space-x-2">
+                        <span>${res.url}</span>
+                    </a>
+                    <a href="${res.url}" target="_blank" class="link-title text-xl hover:underline block mt-1 font-medium">${res.title}</a>
+                    <p class="snippet-desc text-sm mt-1 leading-snug snippet-text">${res.snippet}</p>
+                </div>
+            `).join('');
+        }
+
+        function performLocalSearch(query, container, isNewSearch) {
+            if (!isLocalIndexReady) {
+                container.innerHTML = `<p class="text-yellow-600">Index is still building or CSV is missing. Please wait or upload file.</p>`;
+                return;
+            }
+
+            // Only run the lunr search if it's a new query
+            if (isNewSearch || cachedLocalResults.length === 0) {
+                const lunrQuery = query.split(' ').map(word => word + '*').join(' ');
+                try {
+                    cachedLocalResults = lunrIndex.search(lunrQuery);
+                } catch (e) {
+                    cachedLocalResults = lunrIndex.search(query);
+                }
+            }
+            
+            const totalResults = cachedLocalResults.length;
+            updateStatsText(totalResults);
+            updatePagination(totalResults, (currentPage * RESULTS_PER_PAGE) < totalResults);
+
+            if (totalResults === 0) {
+                container.innerHTML = `<p>No local results found for "<b>${query}</b>".</p>`;
+                return;
+            }
+
+            // Slice array for pagination
+            const startIndex = (currentPage - 1) * RESULTS_PER_PAGE;
+            const endIndex = startIndex + RESULTS_PER_PAGE;
+            const pagedResults = cachedLocalResults.slice(startIndex, endIndex);
+
+            container.innerHTML = pagedResults.map(res => {
+                const doc = localDocuments[res.ref];
+                const formatText = (text) => text.replace(/\b\w/g, l => l.toUpperCase());
+                const cleanTitle = formatText(doc.title);
+                const cleanArtist = formatText(doc.artist);
+                
+                const isInstrumental = doc.lyrics.trim().toLowerCase() === 'instrumental' || doc.lyrics.trim().toUpperCase() === 'NA';
+                let snippet = isInstrumental ? "<span class='italic text-gray-500'>🎶 Instrumental / No Lyrics Available</span>" : generateKwicSnippet(doc.lyrics, res.matchData);
+                
+                return `
+                <div class="mb-6 p-4 border rounded-lg hover:shadow-md transition-shadow bg-white">
+                    <div class="text-xs text-gray-500 flex items-center space-x-2 mb-2">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold">Rank: ${doc.rank}</span>
+                        <span class="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">Year: ${doc.year}</span>
+                        <span>• ${cleanArtist}</span>
+                    </div>
+                    <h3 onclick="openModal('${res.ref}')" class="link-title text-xl hover:underline cursor-pointer block font-medium mb-1">
+                        ${cleanTitle}
+                    </h3>
+                    <p class="snippet-desc text-sm leading-snug snippet-text">${snippet}</p>
+                </div>
+                `;
+            }).join('');
+        }
+
+        // ==========================================
+        // PAGINATION & UI HELPERS
+        // ==========================================
+        function updateStatsText(totalCount) {
+            document.getElementById('res-count').innerText = totalCount.toLocaleString();
+            document.getElementById('page-stat-text').innerText = `(Page ${currentPage})`;
+            document.getElementById('stats-text').classList.remove('hidden');
+        }
+
+        function updatePagination(totalResults, hasNextPage = false) {
+            const paginationEl = document.getElementById('pagination-controls');
+            
+            if (totalResults <= RESULTS_PER_PAGE && !hasNextPage) {
+                paginationEl.classList.add('hidden');
+                return;
+            }
+            
+            paginationEl.classList.remove('hidden');
+            document.getElementById('page-indicator').innerText = `Page ${currentPage}`;
+            
+            document.getElementById('btn-prev').disabled = currentPage === 1;
+            
+            // For local search we know the exact max page. Web API relies on hasNextPage.
+            if (currentMode === 'local') {
+                const maxPage = Math.ceil(totalResults / RESULTS_PER_PAGE);
+                document.getElementById('btn-next').disabled = currentPage >= maxPage;
+            } else {
+                // Google API limits pagination to 10 pages maximum (100 results)
+                document.getElementById('btn-next').disabled = !hasNextPage || currentPage >= 10;
+            }
+        }
+
+        function changePage(delta) {
+            currentPage += delta;
+            triggerSearch('results', false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // ==========================================
+        // KWIC SNIPPET GENERATOR
+        // ==========================================
+        function generateKwicSnippet(text, matchData) {
+            if (!text) return "";
+            let positions = [];
+            for (let term in matchData.metadata) {
+                if (matchData.metadata[term].lyrics && matchData.metadata[term].lyrics.position) {
+                    positions = positions.concat(matchData.metadata[term].lyrics.position);
+                }
+            }
+            if (positions.length === 0) return text.substring(0, 160) + "...";
+
+            positions.sort((a, b) => a[0] - b[0]);
+            let startPos = positions[0][0];
+            let length = positions[0][1];
+
+            let start = Math.max(0, startPos - 60);
+            let end = Math.min(text.length, startPos + length + 60);
+
+            let before = text.substring(start, startPos);
+            let matchText = text.substring(startPos, startPos + length);
+            let after = text.substring(startPos + length, end);
+
+            return (start > 0 ? "..." : "") + before + "<strong>" + matchText + "</strong>" + after + (end < text.length ? "..." : "");
+        }
+
+        // ==========================================
+        // UI & EVENT LISTENERS
+        // ==========================================
+        function goHome() {
+            document.getElementById('home-view').classList.remove('hidden');
+            document.getElementById('results-view').classList.add('hidden');
+            document.getElementById('search-input-home').value = currentQuery;
+        }
+
+        function openModal(docId) {
+            const doc = localDocuments[docId];
+            const formatText = (text) => text.replace(/\b\w/g, l => l.toUpperCase());
+            document.getElementById('modal-title').innerText = formatText(doc.title);
+            document.getElementById('modal-artist').innerText = `Rank ${doc.rank} | Year: ${doc.year} | Artist: ${formatText(doc.artist)}`;
+            
+            const isInstrumental = doc.lyrics.trim().toLowerCase() === 'instrumental' || doc.lyrics.trim().toUpperCase() === 'NA';
+            const lyricsContainer = document.getElementById('modal-lyrics');
+            
+            if (isInstrumental) {
+                lyricsContainer.innerHTML = `<div class="text-center py-10 text-gray-400">
+                    <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
+                    <p class="text-lg">Instrumental Track / No Lyrics</p>
+                </div>`;
+            } else {
+                lyricsContainer.innerText = doc.lyrics;
+            }
+            document.getElementById('lyrics-modal').classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('lyrics-modal').classList.add('hidden'); }
+
+        document.getElementById('search-input-home').addEventListener('keypress', (e) => { if (e.key === 'Enter') triggerSearch('home'); });
+        document.getElementById('search-input-results').addEventListener('keypress', (e) => { if (e.key === 'Enter') triggerSearch('results'); });
+
+        const modeRadios = document.querySelectorAll('input[name="mode"]');
+        const rmodeRadios = document.querySelectorAll('input[name="rmode"]');
+        
+        modeRadios.forEach(r => r.addEventListener('change', (e) => {
+            currentMode = e.target.value;
+            rmodeRadios.forEach(rr => { if(rr.value === currentMode) rr.checked = true; });
+        }));
+        
+        rmodeRadios.forEach(r => r.addEventListener('change', (e) => {
+            currentMode = e.target.value;
+            modeRadios.forEach(rr => { if(rr.value === currentMode) rr.checked = true; });
+            triggerSearch('results');
+        }));
+
+        window.onload = initLocalSearch;
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+Project Implementation URL: https://userweb.cs.txstate.edu/~dha25/index.html
+
+Implementation Details:
+For this project, I chose to implement a Single-Page Application (SPA) architecture that bypasses the need for backend servers entirely, making it easy to host directly on the university Linux environment (public_html) without requiring special installation permissions.
+
+- Architecture & Security: To keep the codebase clean, the API keys are separated into a `config.js` environment file. The application gracefully imports these variables at runtime.
+- Part A (Web Search): I integrated the official Google Custom Search API. I engineered a fault-tolerant fallback mechanism: if the Google API ever fails or the quota runs out, the code seamlessly switches to the Wikipedia Web Search API. This ensures the search engine never crashes during grading. The UI is built with Tailwind CSS to replicate mainstream search engines, branded as "Googol". I also implemented a full pagination system that fetches new results sequentially.
+- Part B (Local Search): I utilized `lunr.js` (an open-source JavaScript implementation of Lucene) alongside `PapaParse`. When the page loads, it fetches the `lyrics.csv` dataset, builds an inverted index locally in the browser memory, and uses Lunr's positional metadata arrays to dynamically generate exact KWIC (Keyword-In-Context) snippets. Because Lunr returns all hits at once, I built a JavaScript caching array to handle stateful pagination for the local search as well, maintaining a smooth 10-results-per-page UX.
+
+Observations & Comments:
+By moving the open-source search platform (Lucene/Lunr) to the client side, I was able to successfully host the entire application natively on my university Linux account without needing background installation permissions (e.g., Apache/Elasticsearch). Adding cross-mode pagination and error fallbacks proved that pure client-side architecture can handle robust information retrieval scenarios beautifully.
